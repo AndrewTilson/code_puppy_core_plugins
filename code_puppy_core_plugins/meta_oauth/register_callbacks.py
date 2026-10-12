@@ -127,7 +127,7 @@ def _create_meta_oauth_model(
     del config
     from pydantic_ai.models.openai import OpenAIResponsesModel
 
-    from code_puppy.http_utils import create_async_client
+    from code_puppy.httpx2_utils import create_async_client
     from code_puppy.provider_identity import make_openai_provider
 
     credentials = load_credentials()
