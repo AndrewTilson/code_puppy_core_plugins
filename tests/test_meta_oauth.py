@@ -121,6 +121,8 @@ class TestReasoningConfig:
         assert profile["openai_supports_reasoning"]
         assert profile["openai_supports_minimal_reasoning_effort"]
         assert not profile["openai_supports_reasoning_effort_none"]
+        # Regression: dropping phase on replay makes Muse end runs on preambles.
+        assert profile["openai_supports_phase"]
 
 
 class TestDescribePlan:
