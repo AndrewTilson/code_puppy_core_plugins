@@ -18,6 +18,7 @@ from .config import (
     META_OAUTH_CONFIG,
     get_muse_auth_path,
     get_token_storage_path,
+    reasoning_spec,
 )
 
 logger = logging.getLogger(__name__)
@@ -264,8 +265,10 @@ def discover_models(credentials: dict[str, Any]) -> dict[str, dict[str, Any]]:
         limits = raw_limits if isinstance(raw_limits, dict) else {}
         models[row["id"]] = {
             "context_length": int(limits.get("context") or 128_000),
-            "supported_settings": ["reasoning_effort"]
-            if details.get("reasoning")
-            else [],
+            **(
+                reasoning_spec(row["id"])
+                if details.get("reasoning")
+                else {"supported_settings": []}
+            ),
         }
     return models or dict(FALLBACK_MODELS)

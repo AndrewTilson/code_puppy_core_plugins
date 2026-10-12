@@ -6,7 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from code_puppy_core_plugins.meta_oauth import plan, utils
+from code_puppy_core_plugins.meta_oauth import plan, register_callbacks, utils
+from code_puppy_core_plugins.meta_oauth.config import (
+    DEFAULT_REASONING_EFFORT,
+    reasoning_effort_choices,
+)
 
 
 def _response(payload: dict[str, object], status: int = 200) -> MagicMock:
@@ -58,6 +62,65 @@ class TestMintApiCredentials:
         with patch.object(utils.requests, "post", return_value=_response(problem, 400)):
             with pytest.raises(RuntimeError, match="nope"):
                 utils.mint_api_credentials("access-token")
+
+
+class TestReasoningConfig:
+    """Meta Muse effort scale: docs say "none" 400s on Wonder/Spark and
+    "max" is unavailable on muse-spark-1.3-contributor."""
+
+    @pytest.mark.parametrize("model_id", ["muse-wonder-1.0", "muse-spark-1.3"])
+    def test_full_scale_includes_max_without_none(self, model_id: str) -> None:
+        choices = reasoning_effort_choices(model_id)
+        assert "max" in choices and "minimal" in choices
+        assert "none" not in choices
+
+    def test_contributor_omits_max(self) -> None:
+        choices = reasoning_effort_choices("muse-spark-1.3-contributor")
+        assert "max" not in choices and "none" not in choices
+        assert "xhigh" in choices
+
+    def test_load_meta_models_advertises_choices_and_default(self) -> None:
+        credentials = {
+            "models": {
+                "muse-spark-1.3-contributor": {
+                    "context_length": 1_007_997,
+                    "supported_settings": ["reasoning_effort"],
+                }
+            }
+        }
+        with patch.object(
+            register_callbacks, "load_credentials", return_value=credentials
+        ):
+            models = register_callbacks._load_meta_models()
+
+        entry = models["meta-muse-spark-1.3-contributor"]
+        assert "none" not in entry["setting_choices"]["reasoning_effort"]
+        assert "max" not in entry["setting_choices"]["reasoning_effort"]
+        assert entry["setting_defaults"]["reasoning_effort"] == (
+            DEFAULT_REASONING_EFFORT
+        )
+
+    def test_created_model_requests_encrypted_reasoning(self) -> None:
+        """Profile must opt into include=["reasoning.encrypted_content"],
+        or pydantic-ai drops thinking blocks on replay."""
+        credentials = {
+            "api_key": "sk-test",
+            "api_base_url": "https://api.meta.ai/v1",
+        }
+        with patch.object(
+            register_callbacks, "load_credentials", return_value=credentials
+        ):
+            model = register_callbacks._create_meta_oauth_model(
+                "meta-muse-spark-1.3",
+                {"type": "meta_oauth", "name": "muse-spark-1.3"},
+                {},
+            )
+
+        profile = model.profile
+        assert profile["openai_supports_encrypted_reasoning_content"]
+        assert profile["openai_supports_reasoning"]
+        assert profile["openai_supports_minimal_reasoning_effort"]
+        assert not profile["openai_supports_reasoning_effort_none"]
 
 
 class TestDescribePlan:
