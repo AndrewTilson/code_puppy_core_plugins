@@ -123,6 +123,8 @@ class TestReasoningConfig:
         assert not profile["openai_supports_reasoning_effort_none"]
         # Regression: dropping phase on replay makes Muse end runs on preambles.
         assert profile["openai_supports_phase"]
+        # Without a requested summary Meta streams no reasoning until it ends.
+        assert model.settings == {"openai_reasoning_summary": "auto"}
 
 
 class TestDescribePlan:
