@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -188,9 +189,14 @@ def poll_device_token(device_code: str) -> tuple[str, dict[str, Any]]:
 
 
 def mint_api_credentials(access_token: str) -> dict[str, Any]:
-    """Exchange a Meta account token for a Model API credential."""
+    """Exchange a Meta account token for a Model API credential.
+
+    The mint endpoint rejects a body-less POST with "Request body is required
+    but was empty or null", so always send an (empty) JSON object.
+    """
     response = requests.post(
         _validate_url(str(META_OAUTH_CONFIG["mint_url"]), "api.meta.ai"),
+        json={},
         headers={
             "Accept": "application/json",
             "Authorization": f"Bearer {access_token}",
@@ -205,13 +211,26 @@ def mint_api_credentials(access_token: str) -> dict[str, Any]:
             _problem(response, f"Meta key mint failed ({response.status_code})")
         )
     payload = response.json()
-    if not isinstance(payload, dict) or not payload.get("api_key"):
-        raise RuntimeError("Meta key mint returned no API key")
+    if not isinstance(payload, dict):
+        raise RuntimeError("Meta key mint returned invalid JSON")
+    if not payload.get("api_key"):
+        raise RuntimeError(_mint_refusal(payload))
     payload["api_base_url"] = validate_api_base_url(
         str(payload.get("base_url") or payload.get("api_base_url") or "")
     )
     payload.pop("base_url", None)
     return payload
+
+
+def _mint_refusal(payload: Mapping[str, object]) -> str:
+    """Explain a key-less mint, e.g. a Muse Code plan that needs payment."""
+    reason = str(
+        payload.get("detail")
+        or payload.get("title")
+        or "Meta key mint returned no API key"
+    )
+    action_url = payload.get("action_url")
+    return f"{reason} ({action_url})" if action_url else reason
 
 
 def discover_models(credentials: dict[str, Any]) -> dict[str, dict[str, Any]]:

@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from importlib.resources import files
 from typing import Any
 
 from code_puppy.callbacks import register_callback
-from code_puppy.i18n import t
+from code_puppy.i18n import register_plugin_catalog, t
 from code_puppy.messaging import emit_info, emit_success, emit_warning
 from code_puppy.model_switching import set_model_and_reload_agent
 
 from .config import FALLBACK_MODELS, META_OAUTH_CONFIG, get_token_storage_path
 from .oauth_flow import run_oauth_flow
+from .plan import describe_plan
 from .utils import discover_models, load_credentials
+
+register_plugin_catalog(files(__package__).joinpath("locales"))
 
 _PREFIX = str(META_OAUTH_CONFIG["prefix"])
 _DEFAULT_MODEL = f"{_PREFIX}{META_OAUTH_CONFIG['default_model']}"
@@ -80,6 +84,8 @@ def _handle_meta_status() -> None:
     emit_info(
         t("oauth.meta.status.source", source=credentials.get("_source", "unknown"))
     )
+    for line in describe_plan(credentials):
+        emit_info(line)
     emit_info(
         t("oauth.meta.status.models", models=", ".join(_meta_model_names(credentials)))
     )
