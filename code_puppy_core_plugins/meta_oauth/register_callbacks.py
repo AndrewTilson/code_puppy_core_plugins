@@ -166,12 +166,19 @@ def _create_meta_oauth_model(
     # and drops thinking blocks when replaying prior turns. Reasoning
     # cannot be disabled on Muse Wonder/Spark ("none" -> HTTP 400),
     # but "minimal" (the shortest pass) is supported.
+    #
+    # Muse labels progress preambles with phase="commentary" (codex style).
+    # Without openai_supports_phase, replayed preambles lose that label and
+    # read as final answers; over a long session Muse then starts emitting
+    # preambles in the final channel with no tool call, ending the run
+    # mid-task. Meta accepts phase on input (live-verified 2026-10-12).
     profile = OpenAIModelProfile(
         openai_supports_reasoning=True,
         openai_reasoning_enabled_by_default=True,
         openai_supports_encrypted_reasoning_content=True,
         openai_supports_reasoning_effort_none=False,
         openai_supports_minimal_reasoning_effort=True,
+        openai_supports_phase=True,
     )
     return OpenAIResponsesModel(
         model_name=model_config["name"], provider=provider, profile=profile
