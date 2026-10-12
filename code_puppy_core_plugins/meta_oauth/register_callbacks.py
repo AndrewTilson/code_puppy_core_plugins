@@ -137,7 +137,10 @@ def _create_meta_oauth_model(
 ) -> Any:
     """Create a Muse model using Meta's OpenAI Responses-compatible API."""
     del config
-    from pydantic_ai.models.openai import OpenAIResponsesModel
+    from pydantic_ai.models.openai import (
+        OpenAIResponsesModel,
+        OpenAIResponsesModelSettings,
+    )
     from pydantic_ai.profiles.openai import OpenAIModelProfile
 
     from code_puppy.httpx2_utils import create_async_client
@@ -180,8 +183,19 @@ def _create_meta_oauth_model(
         openai_supports_minimal_reasoning_effort=True,
         openai_supports_phase=True,
     )
+    # Meta buffers tool-call arguments server-side (one JSON field per
+    # delta, after generation) on both Responses and Chat Completions, and
+    # no header or request option in the official Muse CLI changes that.
+    # What we can fix is the silent reasoning phase: without a requested
+    # summary Meta emits no reasoning events until the item completes;
+    # with one, summaries stream within seconds. Model-level settings are
+    # defaults, so per-request settings still win.
+    settings = OpenAIResponsesModelSettings(openai_reasoning_summary="auto")
     return OpenAIResponsesModel(
-        model_name=model_config["name"], provider=provider, profile=profile
+        model_name=model_config["name"],
+        provider=provider,
+        profile=profile,
+        settings=settings,
     )
 
 
