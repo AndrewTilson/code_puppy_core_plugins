@@ -63,6 +63,16 @@ def test_routing_prompt_only_names_real_tools_and_skills() -> None:
         assert f"`{required}`" in text
 
 
+def test_sub_agents_are_told_not_to_restart_the_playbook() -> None:
+    """load_prompt reaches delegates too; they must not fan out again."""
+    assert prompt.SUBAGENT_RULE in prompt.ROUTING
+    assert "`poteto-mode`" in prompt.SUBAGENT_RULE
+    # The rule must follow the routing and delegation lines it overrides.
+    assert prompt.ROUTING.index(prompt.SUBAGENT_RULE) > prompt.ROUTING.index(
+        "Delegate with `invoke_agent`"
+    )
+
+
 def test_models_file_is_appended_when_present() -> None:
     assert prompt.routing_prompt() == prompt.ROUTING
     path = models_file()

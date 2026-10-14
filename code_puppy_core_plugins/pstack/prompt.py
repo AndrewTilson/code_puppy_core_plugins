@@ -18,6 +18,15 @@ logger = logging.getLogger(__name__)
 # A user-edited file lands in every system prompt; cap what it can cost.
 MODELS_FILE_MAX_CHARS = 4000
 
+# load_prompt reaches sub-agents too, and core gives this hook no agent name.
+# Without this rule a delegate handed one slice of a task would restart the
+# poteto-mode playbook and fan out again.
+SUBAGENT_RULE = (
+    "Running as a sub-agent: skip the `poteto-mode` routing and the delegation "
+    "rule above; do the task you were given, loading a specific skill only "
+    "when it serves that task."
+)
+
 ROUTING = f"""\
 ## pstack (poteto's engineering skills)
 Load a skill with `activate_skill(name)` (or read `{SKILLS_DIR}/<name>/SKILL.md`).
@@ -36,6 +45,7 @@ edit): do it directly, then verify.
 - Delegate with `invoke_agent` (`poteto-agent` for playbook delegates). When a \
 role names a model, use `invoke_agent_with_model` with an alias from \
 `list_available_models`. Ask with `ask_user_question`; run with `shell`.
+- {SUBAGENT_RULE}
 - User and project instructions win over pstack."""
 
 
