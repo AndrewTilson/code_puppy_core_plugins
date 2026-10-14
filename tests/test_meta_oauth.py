@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -170,3 +171,32 @@ class TestDescribePlan:
         }
         with patch.object(plan, "t", _fake_t):
             assert plan.describe_plan(credentials) == []
+
+
+class TestSaveCredentials:
+    """Regression: os.fchmod is POSIX-only and its failure leaked the temp fd,
+    so the cleanup unlink then crashed on Windows with WinError 32."""
+
+    def test_writes_payload_without_fchmod(self, tmp_path, monkeypatch) -> None:
+        destination = tmp_path / "meta_oauth.json"
+        monkeypatch.setattr(utils, "get_token_storage_path", lambda: destination)
+        monkeypatch.delattr(utils.os, "fchmod", raising=False)
+
+        assert utils.save_credentials({"api_key": "sk-muse", "_source": "x"})
+
+        assert json.loads(destination.read_text(encoding="utf-8")) == {
+            "api_key": "sk-muse"
+        }
+        assert [p.name for p in tmp_path.iterdir()] == ["meta_oauth.json"]
+
+    def test_failure_returns_false_and_cleans_up(self, tmp_path, monkeypatch) -> None:
+        destination = tmp_path / "meta_oauth.json"
+        monkeypatch.setattr(utils, "get_token_storage_path", lambda: destination)
+
+        def boom(*_args: object) -> None:
+            raise OSError("disk on fire")
+
+        monkeypatch.setattr(utils.os, "replace", boom)
+
+        assert utils.save_credentials({"api_key": "sk-muse"}) is False
+        assert list(tmp_path.iterdir()) == []

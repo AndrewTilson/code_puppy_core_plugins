@@ -100,7 +100,12 @@ def load_credentials() -> dict[str, Any] | None:
 
 
 def save_credentials(credentials: dict[str, Any]) -> bool:
-    """Atomically save private Meta credentials with mode 0600."""
+    """Atomically save private Meta credentials.
+
+    ``mkstemp`` already creates the file owner-only (0600 on POSIX), and
+    ``os.replace`` keeps that mode, so no extra chmod is needed. That matters
+    because ``os.fchmod`` doesn't exist on Windows.
+    """
     if not credentials.get("api_key"):
         raise ValueError("Meta credentials require an api_key")
     destination = get_token_storage_path()
@@ -110,17 +115,20 @@ def save_credentials(credentials: dict[str, Any]) -> bool:
         fd, temporary_path = tempfile.mkstemp(
             prefix=".meta_oauth.", dir=destination.parent
         )
-        os.fchmod(fd, 0o600)
+        # Hand the fd to fdopen immediately so it is always closed; an open
+        # handle makes the cleanup unlink below fail on Windows (WinError 32).
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
             handle.write("\n")
         os.replace(temporary_path, destination)
-        destination.chmod(0o600)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to save Meta OAuth credentials: %s", exc)
         if temporary_path:
-            Path(temporary_path).unlink(missing_ok=True)
+            try:
+                Path(temporary_path).unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove temp file %s", temporary_path)
         return False
 
 
