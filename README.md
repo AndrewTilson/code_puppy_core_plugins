@@ -63,6 +63,13 @@ player can play it. Linux uses `notify-send` for desktop notifications when it
 is installed; Windows uses a best-effort PowerShell toast. No external Python
 dependencies are required.
 
+## pstack
+
+The `pstack` plugin bundles poteto's [pstack](https://github.com/cursor/plugins/tree/main/pstack)
+skill pack (MIT, Lauren Tan), adapted from Cursor to Code Puppy. It is disabled
+by default. `/pstack` describes it and `/pstack on` enables it. Details are in
+[`code_puppy_core_plugins/pstack/README.md`](code_puppy_core_plugins/pstack/README.md).
+
 ## Releases
 
 Pushes to `main` run lint and tests, bump the patch version, build, publish to
