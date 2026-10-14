@@ -28,7 +28,7 @@ disable the plugin outright, which also removes `/pstack`.
 | `create-skill` (written for this plugin; Cursor's is an editor built-in) | Draft, validate, test and tune skills. `python -m code_puppy_core_plugins.pstack.skill_validator <dir>` checks a skill with Code Puppy's own loader |
 | 24 `principle-*` leaves | One `pstack-principles` index skill; leaves are read on demand |
 | `poteto-agent`, `comment-sicko` | `register_agents` (invokable via `invoke_agent`, selectable with `/agent`) |
-| Routing rules (when to reach for which skill) | `load_prompt`, about 350 tokens |
+| Routing rules (when to reach for which skill) | `load_prompt`, about 380 tokens; sub-agents are told to skip the playbook and do their slice |
 | `/setup-pstack` model roles | `~/.code_puppy/pstack/pstack-models.md`, injected into the prompt |
 | Per-role models | `list_available_models` + `invoke_agent_with_model` added to `code-puppy` |
 | `/pstack [on\|off]` | The switch, plus pin, skill groups and model-role file status |
