@@ -10,7 +10,9 @@ from typing import Any, TypeVar
 
 from code_puppy.agents import _key_listeners
 from code_puppy.agents._run_signals import (
+    clear_detach_event,
     drain_pause_state_on_cancel,
+    install_detach_event,
     make_schedule_cancel,
     sigint_should_cancel,
 )
@@ -19,6 +21,7 @@ from code_puppy.messaging.run_ui import run_ui
 from code_puppy.tools import command_runner
 
 _Result = TypeVar("_Result")
+_detached_tasks: set[asyncio.Task[Any]] = set()
 
 
 async def run_with_cancel_controls(work: Coroutine[Any, Any, _Result]) -> _Result:
@@ -32,6 +35,9 @@ async def run_with_cancel_controls(work: Coroutine[Any, Any, _Result]) -> _Resul
     handle = None
     spawned = True
     previous_signal = None
+    detach_event = asyncio.Event()
+    detach_wait = None
+    detached = False
 
     def handle_sigint(_sig: int, _frame: Any) -> None:
         if not command_runner.is_awaiting_user_input() and sigint_should_cancel():
@@ -40,6 +46,7 @@ async def run_with_cancel_controls(work: Coroutine[Any, Any, _Result]) -> _Resul
     try:
         with run_ui():
             try:
+                install_detach_event(detach_event)
                 command_runner.register_agent_cancel(cancel)
                 if (
                     threading.current_thread() is threading.main_thread()
@@ -51,7 +58,22 @@ async def run_with_cancel_controls(work: Coroutine[Any, Any, _Result]) -> _Resul
                 )
                 if not spawned:
                     _key_listeners.set_cancel_handler(cancel)
-                return await task
+                detach_wait = asyncio.create_task(detach_event.wait())
+                cancelled = False
+                while True:
+                    try:
+                        done, _ = await asyncio.wait(
+                            {task, detach_wait}, return_when=asyncio.FIRST_COMPLETED
+                        )
+                        break
+                    except asyncio.CancelledError:
+                        # Unlike a direct await, wait() does not cancel its children.
+                        task.cancel()
+                        cancelled = True
+                detached = detach_wait in done
+                if detached or cancelled:
+                    raise asyncio.CancelledError
+                return task.result()
             except (asyncio.CancelledError, KeyboardInterrupt):
                 drain_pause_state_on_cancel()
                 raise
@@ -69,6 +91,21 @@ async def run_with_cancel_controls(work: Coroutine[Any, Any, _Result]) -> _Resul
                 if previous_signal is not None:
                     signal.signal(signal.SIGINT, previous_signal)
     finally:
-        if not task.done():
-            task.cancel()
+        clear_detach_event()
+        if detached:
+            # Keep abandoned work alive without letting its result rejoin the goal.
+            _detached_tasks.add(task)
+
+            def observe_detached(completed: asyncio.Task[_Result]) -> None:
+                _detached_tasks.discard(completed)
+                if not completed.cancelled():
+                    completed.exception()
+
+            task.add_done_callback(observe_detached)
+        if detach_wait is not None:
+            detach_wait.cancel()
+            await asyncio.gather(detach_wait, return_exceptions=True)
+        if not detached:
+            if not task.done():
+                task.cancel()
             await asyncio.gather(task, return_exceptions=True)

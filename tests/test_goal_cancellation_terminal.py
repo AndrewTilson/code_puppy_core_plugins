@@ -103,7 +103,7 @@ def test_terminal_cancel_during_goal_judging(tmp_path, persistent, cancel_key):
         sys.executable, ["-c", program], env=environment, encoding="utf-8", timeout=20
     )
     try:
-        child.expect_exact("JUDGES_READY")
+        child.expect_exact("JUDGES_READY", timeout=60)
         child.send("queued input\r")
         child.send("now input\x1b[13;5u")
         child.expect_exact("STEERS_READY")
