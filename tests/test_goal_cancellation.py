@@ -14,6 +14,7 @@ import pytest
 from code_puppy import keymap
 from code_puppy.agents import _key_listeners
 from code_puppy.messaging import run_ui
+from code_puppy.messaging.pause_controller import PauseController
 from code_puppy.tools import command_runner
 from code_puppy_core_plugins.wiggum import (
     cancellation,
@@ -27,6 +28,9 @@ from code_puppy_core_plugins.wiggum.judge_config import JudgeConfig
 
 @pytest.fixture
 def judge_phase(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "code_puppy.messaging.pause_controller._pause_controller", PauseController()
+    )
     monkeypatch.setattr(goal_runs, "_RUNS_DIR", tmp_path)
     run = goal_runs.create("finish the work")
     state.start(run.prompt, mode="goal", run_id=run.run_id)
@@ -245,3 +249,33 @@ async def test_listener_setup_failure_restores_controls(judge_phase, monkeypatch
     assert command_runner._AGENT_CANCEL_CB is None
     assert signal.getsignal(signal.SIGINT) is previous_signal
     judge.assert_not_called()
+
+
+@pytest.mark.parametrize("outcome", ["success", "cancel"])
+async def test_judge_cancellation_discards_steers_but_success_defers_them(
+    judge_phase, monkeypatch, outcome
+):
+    from code_puppy.messaging.pause_controller import get_pause_controller
+
+    pc = get_pause_controller()
+    # Exercise the actual teardown deferral, not the fixture's no-op.
+    monkeypatch.setattr(run_ui, "_defer_undelivered_steers", pc.defer_pending_steer_now)
+
+    async def judge(**kwargs):
+        pc.pause()
+        pc.request_steer("now input", mode="now", history_recorded=True)
+        pc.request_steer("queued input", mode="queue", history_recorded=True)
+        if outcome == "cancel":
+            raise asyncio.CancelledError
+        return True, "", []
+
+    monkeypatch.setattr(register_callbacks, "_run_goal_judges", judge)
+    await register_callbacks._on_interactive_turn_end(
+        SimpleNamespace(), judge_phase.run.prompt
+    )
+    if outcome == "cancel":
+        assert not pc.is_paused()
+        assert pc.pending_steer_counts() == (0, 0)
+    else:
+        assert pc.pending_steer_counts() == (0, 2)
+        assert pc.drain_pending_steer_queued() == ["queued input", "now input"]

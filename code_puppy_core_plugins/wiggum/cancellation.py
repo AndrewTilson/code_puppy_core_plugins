@@ -9,7 +9,11 @@ from collections.abc import Coroutine
 from typing import Any, TypeVar
 
 from code_puppy.agents import _key_listeners
-from code_puppy.agents._run_signals import make_schedule_cancel, sigint_should_cancel
+from code_puppy.agents._run_signals import (
+    drain_pause_state_on_cancel,
+    make_schedule_cancel,
+    sigint_should_cancel,
+)
 from code_puppy.keymap import sigint_fallback_cancels
 from code_puppy.messaging.run_ui import run_ui
 from code_puppy.tools import command_runner
@@ -48,6 +52,9 @@ async def run_with_cancel_controls(work: Coroutine[Any, Any, _Result]) -> _Resul
                 if not spawned:
                     _key_listeners.set_cancel_handler(cancel)
                 return await task
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                drain_pause_state_on_cancel()
+                raise
             finally:
                 # Disarm before returning the persistent prompt to idle routing.
                 command_runner.clear_agent_cancel()

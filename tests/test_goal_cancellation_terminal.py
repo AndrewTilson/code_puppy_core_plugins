@@ -23,6 +23,7 @@ def test_terminal_cancel_during_goal_judging(tmp_path, persistent, cancel_key):
         from code_puppy.cli_runner import _interactive_sigint_guard
         from code_puppy.config import set_value
         from code_puppy.messaging import run_ui
+        from code_puppy.messaging.pause_controller import get_pause_controller
         from code_puppy_core_plugins.wiggum import goal_runs, register_callbacks, state
         from code_puppy_core_plugins.wiggum.judge_config import JudgeConfig
 
@@ -53,6 +54,14 @@ def test_terminal_cancel_during_goal_judging(tmp_path, persistent, cancel_key):
                 JudgeConfig(name="beta", model="test"),
             ]
             register_callbacks._display_llm_judge = lambda *a, **k: None
+            pc = get_pause_controller()
+
+            async def confirm_steers():
+                while pc.pending_steer_counts() != (1, 1):
+                    await asyncio.sleep(0.01)
+                print("STEERS_READY", flush=True)
+
+            monitor = asyncio.create_task(confirm_steers())
             try:
                 result = await register_callbacks._on_interactive_turn_end(
                     SimpleNamespace(get_message_history=lambda: []), run.prompt
@@ -62,11 +71,15 @@ def test_terminal_cancel_during_goal_judging(tmp_path, persistent, cancel_key):
                 assert not state.is_active()
                 assert not run_ui.is_run_active()
                 assert goal_runs.load(run.run_id).status == "interrupted"
+                assert pc.pending_steer_counts() == (0, 0)
+                assert not pc.is_paused()
                 print("PROMPT_RESTORED", flush=True)
                 if PERSISTENT:
                     assert await run_ui.wait_for_idle_submission() == "next turn"
                 print("TERMINAL_OK", flush=True)
             finally:
+                monitor.cancel()
+                await asyncio.gather(monitor, return_exceptions=True)
                 run_ui.stop_persistent_ui()
 
         asyncio.run(main())
@@ -91,6 +104,9 @@ def test_terminal_cancel_during_goal_judging(tmp_path, persistent, cancel_key):
     )
     try:
         child.expect_exact("JUDGES_READY")
+        child.send("queued input\r")
+        child.send("now input\x1b[13;5u")
+        child.expect_exact("STEERS_READY")
         child.send("\x03" if cancel_key == "ctrl+c" else "\x0b")
         child.expect_exact("PROMPT_RESTORED")
         if persistent:
