@@ -81,6 +81,8 @@ async def test_ctrl_c_stops_all_judges_and_preserves_resume(
         return absorbed
 
     monkeypatch.setattr(run_ui, "absorb_ctrl_c_if_composing", absorb_composing)
+    if gesture == "sigint":
+        monkeypatch.setattr(cancellation, "sigint_fallback_cancels", lambda: True)
     monkeypatch.setattr(
         keymap,
         "get_cancel_agent_key",
