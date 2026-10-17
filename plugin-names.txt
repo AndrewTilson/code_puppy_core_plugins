@@ -64,3 +64,4 @@ web_retriever_skill
 wide_completion_menu
 wiggum
 yolo_cli
+setup_cli
