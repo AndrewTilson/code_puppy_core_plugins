@@ -203,28 +203,54 @@ def test_sbx_plan_derives_only_used_credentials(monkeypatch):
 def test_sbx_plan_meta_only_catalog(capsys, monkeypatch):
     from code_puppy_core_plugins.setup_cli import sbx_plan
 
-    monkeypatch.setattr(
-        sbx_plan,
-        "build_plan",
-        lambda catalog=None: {
-            "credentials": [
-                {
-                    "service": "meta",
-                    "env_var": "META_API_KEY",
-                    "domain": "api.meta.ai",
-                    "header": "Authorization",
-                    "format": "Bearer %s",
-                    "models": ["meta-x"],
-                    "host_credential_present": True,
-                    "transport": "proxy-managed-env",
-                }
-            ],
-            "oauth": [],
-            "egress": ["api.meta.ai"],
-            "unsupported": [],
-            "default_model": "meta-x",
-        },
-    )
+    monkeypatch.setattr(sbx_plan, "build_plan", lambda **_: _META_PLAN)
     assert cli.main(["sbx", "plan", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert [c["service"] for c in data["credentials"]] == ["meta"]
+
+
+_META_PLAN = {
+    "credentials": [
+        {
+            "service": "meta",
+            "env_var": "META_API_KEY",
+            "domain": "api.meta.ai",
+            "header": "Authorization",
+            "format": "Bearer %s",
+            "models": ["meta-x"],
+            "host_credential_present": True,
+            "transport": "proxy-managed-env",
+        }
+    ],
+    "oauth": [],
+    "egress": ["api.meta.ai"],
+    "unsupported": [],
+    "default_model": "meta-x",
+}
+
+
+def test_creds_mixin_declares_env_vars(tmp_path):
+    from code_puppy_core_plugins.setup_cli.sbx_plan import write_creds_mixin
+
+    dest = write_creds_mixin(tmp_path / "creds", _META_PLAN)
+    assert dest is not None
+    text = (dest / "code-puppy-creds.yaml").read_text(encoding="utf-8")
+    # This declaration is what makes sbx create META_API_KEY in the guest.
+    assert "name: META_API_KEY" in text
+    assert "proxyManaged: true" in text
+    assert "domain: api.meta.ai" in text
+    assert "api.meta.ai:443" in text
+    assert "sk-" not in text
+    assert (dest / "code-puppy-creds.dockerfile").is_file()
+
+
+def test_export_sbx_bundle_includes_creds_mixin(capsys, monkeypatch, tmp_path):
+    from code_puppy_core_plugins.setup_cli import sbx_plan
+
+    monkeypatch.setattr(sbx_plan, "build_plan", lambda **_: _META_PLAN)
+    dest = tmp_path / "bundle"
+    assert cli.main(["export", str(dest), "--sbx", "--json"]) == 0
+    manifest = json.loads((dest / "MANIFEST.json").read_text(encoding="utf-8"))
+    assert manifest["creds_mixin"] is not None
+    creds_yaml = dest / "code-puppy-creds" / "code-puppy-creds.yaml"
+    assert "name: META_API_KEY" in creds_yaml.read_text(encoding="utf-8")

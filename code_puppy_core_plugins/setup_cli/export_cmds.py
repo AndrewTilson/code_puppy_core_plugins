@@ -108,12 +108,24 @@ def cmd_export(out: Out, dest_dir: str, sbx_layout: bool) -> int:
             )
             included.append(f"{rel}/")
 
+    creds_dest = None
+    if sbx_layout:
+        # The bundle must be runnable as-is: without this mixin sbx
+        # never creates the credential env vars (e.g. META_API_KEY) in
+        # the guest, and OAuth/API-key models silently never register.
+        from . import sbx_plan
+
+        creds_dest = sbx_plan.write_creds_mixin(dest / "code-puppy-creds")
+        if creds_dest is not None:
+            included.append("code-puppy-creds/ (credentials mixin)")
+
     manifest = {
         "kind": "code-puppy-setup-export",
         "sbx_layout": sbx_layout,
         "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "included": included,
         "dropped_credential_keys": dropped_keys,
+        "creds_mixin": str(creds_dest) if creds_dest is not None else None,
         "excluded_note": EXCLUDED_NOTE,
     }
     (dest / "MANIFEST.json").write_text(

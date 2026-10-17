@@ -220,11 +220,23 @@ def build_parser() -> argparse.ArgumentParser:
         "sbx", parents=[common], help="Docker sandbox derivation helpers"
     )
     psbx = p.add_subparsers(dest="action", required=True)
-    psbx.add_parser(
+    plan_p = psbx.add_parser(
         "plan",
         parents=[common],
         help="derive sandbox credentials/egress from configured models",
-    ).set_defaults(func=lambda o, a: sbx_plan.cmd_sbx_plan(o))
+    )
+    plan_p.add_argument("--provider", help="restrict to one service/provider id")
+    plan_p.set_defaults(func=lambda o, a: sbx_plan.cmd_sbx_plan(o, a.provider))
+    creds_p = psbx.add_parser(
+        "creds-mixin",
+        parents=[common],
+        help="write the generated credentials mixin for sbx composition",
+    )
+    creds_p.add_argument("directory")
+    creds_p.add_argument("--provider", help="restrict to one service/provider id")
+    creds_p.set_defaults(
+        func=lambda o, a: sbx_plan.cmd_sbx_creds_mixin(o, a.directory, a.provider)
+    )
     return parser
 
 
