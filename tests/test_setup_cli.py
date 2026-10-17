@@ -158,7 +158,11 @@ def test_auth_list_json(capsys):
     ids = {entry["id"] for entry in data["oauth"]}
     assert {"meta", "claude-code", "codex", "copilot", "grok"} <= ids
     env_vars = {e["env_var"] for e in data["api_keys"]}
-    assert "ZHIPU_API_KEY" in env_vars  # models.dev ZAI providers use this name
+    # Sourced from core's credential_env_var_names() composite, not a
+    # plugin-maintained list: well-known keys are always present, and a
+    # models.dev-only var (e.g. ZHIPU_API_KEY) joins once a configured
+    # model references it.
+    assert "OPENAI_API_KEY" in env_vars
 
 
 def test_unknown_provider_errors(capsys):

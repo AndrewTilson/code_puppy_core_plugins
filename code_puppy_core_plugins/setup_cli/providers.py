@@ -119,42 +119,26 @@ OAUTH_PROVIDERS: tuple[OAuthProvider, ...] = (
 
 _OAUTH_BY_ID = {provider.id: provider for provider in OAUTH_PROVIDERS}
 
-_FALLBACK_API_KEY_ENV_VARS = (
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "OPENROUTER_API_KEY",
-    "GROQ_API_KEY",
-    "MISTRAL_API_KEY",
-    "COHERE_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "TOGETHER_API_KEY",
-    "FIREWORKS_API_KEY",
-    "PERPLEXITY_API_KEY",
-    "CEREBRAS_API_KEY",
-    "HUGGINGFACE_API_KEY",
-    "XAI_API_KEY",
-    "ZAI_API_KEY",
-    "ZHIPU_API_KEY",
-    "SYN_API_KEY",
-    "AZURE_OPENAI_API_KEY",
-)
-
 
 def get_oauth_provider(provider_id: str) -> Optional[OAuthProvider]:
     return _OAUTH_BY_ID.get(provider_id.strip().lower())
 
 
 def api_key_env_vars() -> tuple[str, ...]:
-    """Well-known provider key env vars; the core registry wins if present."""
-    try:
-        from code_puppy import provider_credentials
+    """Credential env vars worth listing: core's own composite derivation.
 
-        known = provider_credentials._WELL_KNOWN_CREDENTIAL_ENV_VARS
-        return tuple(sorted(set(known) | set(_FALLBACK_API_KEY_ENV_VARS)))
+    ``provider_credentials.credential_env_var_names()`` already unions
+    the well-known provider keys with every ``$ENV`` referenced by a
+    configured model, so a provider added via models.dev (whose
+    ProviderInfo.env[0] was encoded into the model config at add time)
+    appears here with no list to maintain in this plugin.
+    """
+    try:
+        from code_puppy.provider_credentials import credential_env_var_names
+
+        return tuple(sorted(credential_env_var_names()))
     except Exception:
-        return _FALLBACK_API_KEY_ENV_VARS
+        return ()
 
 
 def _models_dev_env_vars() -> frozenset:

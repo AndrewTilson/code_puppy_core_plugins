@@ -110,8 +110,18 @@ def _custom_endpoint_credential(
     if not isinstance(endpoint, dict):
         return None
     host = urlparse(str(endpoint.get("url") or "")).hostname
-    raw_key = str(endpoint.get("api_key") or "")
-    env_var = raw_key[1:] if raw_key.startswith("$") else ""
+    # Env-var extraction is core's own logic (same $ENV grammar the
+    # factory resolves), so new reference shapes need no change here.
+    try:
+        from code_puppy.provider_credentials import (
+            extract_api_key_env_vars_from_model_config,
+        )
+
+        names = extract_api_key_env_vars_from_model_config(cfg)
+        env_var = names[0] if names else ""
+    except Exception:
+        raw_key = str(endpoint.get("api_key") or "")
+        env_var = raw_key[1:] if raw_key.startswith("$") else ""
     if not host or not env_var:
         return None
     return {
