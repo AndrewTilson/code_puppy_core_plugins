@@ -20,6 +20,7 @@ code-puppy --setup skill add ./my-skill
 code-puppy --setup agent new reviewer
 code-puppy --setup config set yolo_mode true
 code-puppy --setup export ./my-bundle --sbx   # secret-free, sandbox-ready
+code-puppy --setup sbx plan                  # credentials/egress your models need
 ```
 
 Design notes:

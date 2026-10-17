@@ -61,8 +61,19 @@ def test_config_get_masks_secrets(capsys, monkeypatch):
     assert data["value"] == "(set, hidden)"
 
 
-def test_model_add_and_default(capsys, monkeypatch):
+def test_model_add_and_default(capsys, monkeypatch, tmp_path):
+    import code_puppy.command_line.add_model_menu as amm
+    import code_puppy.config as cp_config
+    import code_puppy.model_factory as mf
+
     from code_puppy_core_plugins.setup_cli import model_cmds
+
+    # EXTRA_MODELS_FILE is an import-time constant in several modules and
+    # is not covered by conftest's DATA_DIR pinning; retarget every copy
+    # or this test writes into the developer's real extra_models.json.
+    fake_extra = str(tmp_path / "extra_models.json")
+    for module in (amm, cp_config, mf):
+        monkeypatch.setattr(module, "EXTRA_MODELS_FILE", fake_extra, raising=False)
 
     from code_puppy.models_dev_parser import ModelInfo, ProviderInfo
 
@@ -151,3 +162,69 @@ def test_auth_list_json(capsys):
 def test_unknown_provider_errors(capsys):
     code = cli.main(["auth", "status", "nope-not-real", "--json"])
     assert code == 2
+
+
+def test_sbx_plan_derives_only_used_credentials(monkeypatch):
+    from code_puppy_core_plugins.setup_cli import providers
+    from code_puppy_core_plugins.setup_cli.sbx_plan import build_plan
+
+    monkeypatch.setattr(providers, "credential_present", lambda env: False)
+    monkeypatch.setattr(providers, "oauth_status", lambda p: {"authenticated": False})
+
+    catalog = {
+        "meta-muse-spark-1.3": {"type": "meta_oauth", "name": "muse-spark-1.3"},
+        "zai-coding-glm": {"type": "zai_coding", "name": "glm-5"},
+        "groq-llama": {
+            "type": "custom_openai",
+            "name": "llama-3.3-70b",
+            "custom_endpoint": {
+                "url": "https://api.groq.com/openai/v1",
+                "api_key": "$GROQ_API_KEY",
+            },
+        },
+        "claude-code-opus": {"type": "claude_code", "name": "claude-opus"},
+        "mystery": {"type": "telepathy", "name": "mind"},
+    }
+    plan = build_plan(catalog)
+    services = {c["service"] for c in plan["credentials"]}
+    assert services == {"meta", "zai", "groq"}
+    zai = next(c for c in plan["credentials"] if c["service"] == "zai")
+    assert zai["env_var"] == "ZAI_API_KEY" and zai["domain"] == "api.z.ai"
+    assert zai["header"] == "Authorization" and zai["format"] == "Bearer %s"
+    groq = next(c for c in plan["credentials"] if c["service"] == "groq")
+    assert groq["domain"] == "api.groq.com"
+    # No credential values ever appear in a plan.
+    assert "sk-" not in json.dumps(plan)
+    assert [o["id"] for o in plan["oauth"]] == ["claude-code"]
+    assert "api.anthropic.com" in plan["egress"]
+    assert plan["unsupported"][0]["model"] == "mystery"
+
+
+def test_sbx_plan_meta_only_catalog(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import sbx_plan
+
+    monkeypatch.setattr(
+        sbx_plan,
+        "build_plan",
+        lambda catalog=None: {
+            "credentials": [
+                {
+                    "service": "meta",
+                    "env_var": "META_API_KEY",
+                    "domain": "api.meta.ai",
+                    "header": "Authorization",
+                    "format": "Bearer %s",
+                    "models": ["meta-x"],
+                    "host_credential_present": True,
+                    "transport": "proxy-managed-env",
+                }
+            ],
+            "oauth": [],
+            "egress": ["api.meta.ai"],
+            "unsupported": [],
+            "default_model": "meta-x",
+        },
+    )
+    assert cli.main(["sbx", "plan", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert [c["service"] for c in data["credentials"]] == ["meta"]

@@ -20,6 +20,7 @@ from . import (
     mcp_cmds,
     model_cmds,
     plugin_cmds,
+    sbx_plan,
     skill_cmds,
     wizard,
 )
@@ -214,6 +215,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(
         func=lambda o, a: export_cmds.cmd_import(o, a.directory, a.yes, a.dry_run)
     )
+
+    p = sub.add_parser(
+        "sbx", parents=[common], help="Docker sandbox derivation helpers"
+    )
+    psbx = p.add_subparsers(dest="action", required=True)
+    psbx.add_parser(
+        "plan",
+        parents=[common],
+        help="derive sandbox credentials/egress from configured models",
+    ).set_defaults(func=lambda o, a: sbx_plan.cmd_sbx_plan(o))
     return parser
 
 
