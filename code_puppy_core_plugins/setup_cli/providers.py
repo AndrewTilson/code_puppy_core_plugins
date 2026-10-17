@@ -63,7 +63,7 @@ OAUTH_PROVIDERS: tuple[OAuthProvider, ...] = (
         auth_command="claude-code-auth",
         logout_command="claude-code-logout",
         api_domains=("api.anthropic.com",),
-        auth_domains=("claude.ai", "console.anthropic.com"),
+        auth_domains=("platform.claude.com", "claude.ai", "console.anthropic.com"),
         sandbox_transport="token-file-sync",
         model_prefix="claude-code-",
     ),
@@ -136,6 +136,7 @@ _FALLBACK_API_KEY_ENV_VARS = (
     "HUGGINGFACE_API_KEY",
     "XAI_API_KEY",
     "ZAI_API_KEY",
+    "ZHIPU_API_KEY",
     "SYN_API_KEY",
     "AZURE_OPENAI_API_KEY",
 )
@@ -151,9 +152,33 @@ def api_key_env_vars() -> tuple[str, ...]:
         from code_puppy import provider_credentials
 
         known = provider_credentials._WELL_KNOWN_CREDENTIAL_ENV_VARS
-        return tuple(sorted(known))
+        return tuple(sorted(set(known) | set(_FALLBACK_API_KEY_ENV_VARS)))
     except Exception:
         return _FALLBACK_API_KEY_ENV_VARS
+
+
+def _models_dev_env_vars() -> frozenset:
+    """Every env var any models.dev provider declares (best effort).
+
+    This is the open-ended source: a provider added to models.dev
+    (e.g. ZAI's ZHIPU_API_KEY) works with ``setup auth`` without any
+    code change here.
+    """
+    try:
+        from code_puppy.models_dev_parser import ModelsDevRegistry
+
+        providers_map = ModelsDevRegistry().get_providers()
+        values = (
+            providers_map.values() if isinstance(providers_map, dict) else providers_map
+        )
+        return frozenset(env for p in values for env in (p.env or []))
+    except Exception:
+        return frozenset()
+
+
+def is_known_api_key_env(env_var: str) -> bool:
+    """Known via the curated lists OR declared by a models.dev provider."""
+    return env_var in api_key_env_vars() or env_var in _models_dev_env_vars()
 
 
 def credential_present(env_var: str) -> bool:

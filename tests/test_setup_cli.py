@@ -157,11 +157,27 @@ def test_auth_list_json(capsys):
     data = json.loads(capsys.readouterr().out)
     ids = {entry["id"] for entry in data["oauth"]}
     assert {"meta", "claude-code", "codex", "copilot", "grok"} <= ids
+    env_vars = {e["env_var"] for e in data["api_keys"]}
+    assert "ZHIPU_API_KEY" in env_vars  # models.dev ZAI providers use this name
 
 
 def test_unknown_provider_errors(capsys):
     code = cli.main(["auth", "status", "nope-not-real", "--json"])
     assert code == 2
+
+
+def test_auth_status_accepts_models_dev_env_var(capsys, monkeypatch):
+    # A var known only through models.dev (not any curated list) must be
+    # treated as an API-key provider, not "unknown provider".
+    from code_puppy_core_plugins.setup_cli import providers
+
+    monkeypatch.setattr(
+        providers, "_models_dev_env_vars", lambda: frozenset({"ACME_API_KEY"})
+    )
+    monkeypatch.setattr(providers, "credential_present", lambda env: False)
+    assert cli.main(["auth", "status", "ACME_API_KEY", "--json"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["kind"] == "api-key"
 
 
 def test_sbx_plan_derives_only_used_credentials(monkeypatch):

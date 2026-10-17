@@ -57,7 +57,7 @@ def cmd_auth_status(out: Out, provider_id: str) -> int:
         )
         return 0 if entry["authenticated"] else 1
     env_var = provider_id.strip().upper()
-    if env_var in providers.api_key_env_vars():
+    if providers.is_known_api_key_env(env_var):
         present = providers.credential_present(env_var)
         out.result(
             {"env_var": env_var, "authenticated": present, "kind": "api-key"},

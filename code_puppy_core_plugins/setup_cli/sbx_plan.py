@@ -75,7 +75,12 @@ _CUSTOM_TYPES = {
 _OAUTH_TYPES: dict[str, tuple[str, tuple[str, ...]]] = {
     "claude_code": (
         "claude-code",
-        ("api.anthropic.com", "claude.ai", "console.anthropic.com"),
+        (
+            "api.anthropic.com",
+            "platform.claude.com",
+            "claude.ai",
+            "console.anthropic.com",
+        ),
     ),
     "chatgpt_oauth": ("codex", ("chatgpt.com", "auth.openai.com")),
     "copilot": ("copilot", ("api.githubcopilot.com", "api.github.com", "github.com")),
