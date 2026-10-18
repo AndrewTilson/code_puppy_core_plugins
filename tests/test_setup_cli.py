@@ -184,6 +184,40 @@ def test_auth_status_accepts_models_dev_env_var(capsys, monkeypatch):
     assert data["kind"] == "api-key"
 
 
+def test_auth_logout_clears_stored_api_key(capsys, monkeypatch, tmp_path):
+    # Regression: logout used to call save_credential(env, ""), which core
+    # rejects (empty values raise), so the key was never removed. Logout
+    # must delete from the shared secret store, drop any legacy puppy.cfg
+    # value, and clear the process env; a second logout is a no-op.
+    import configparser
+    import os
+
+    from code_puppy import config as cp_config
+    from code_puppy import config_file, secret_store
+
+    deleted = []
+    monkeypatch.setattr(
+        secret_store, "delete_secret", lambda name: deleted.append(name)
+    )
+    parser = configparser.ConfigParser()
+    parser[cp_config.DEFAULT_SECTION] = {"ZHIPU_API_KEY": "sekrit"}
+    monkeypatch.setattr(config_file, "mutate_config", lambda path, fn: fn(parser))
+    monkeypatch.setattr(cp_config, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(cp_config, "CONFIG_FILE", str(tmp_path / "puppy.cfg"))
+    monkeypatch.setenv("ZHIPU_API_KEY", "sekrit")
+
+    assert cli.main(["auth", "logout", "ZHIPU_API_KEY", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["cleared"] is True
+    assert deleted == ["provider_ZHIPU_API_KEY"]
+    assert not parser.has_option(cp_config.DEFAULT_SECTION, "ZHIPU_API_KEY")
+    assert "ZHIPU_API_KEY" not in os.environ
+
+    # Idempotent: nothing stored anymore, still success.
+    assert cli.main(["auth", "logout", "ZHIPU_API_KEY", "--json"]) == 0
+    capsys.readouterr()
+
+
 def test_sbx_plan_derives_only_used_credentials(monkeypatch):
     from code_puppy_core_plugins.setup_cli import providers
     from code_puppy_core_plugins.setup_cli.sbx_plan import build_plan

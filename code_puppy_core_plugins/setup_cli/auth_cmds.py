@@ -113,9 +113,29 @@ def cmd_auth_logout(out: Out, provider_id: str) -> int:
         if provider and provider.env_var
         else provider_id.strip().upper()
     )
-    from code_puppy.provider_credentials import save_credential
+    from pathlib import Path
 
-    save_credential(env_var, "")
+    from code_puppy import config, secret_store, shared_credentials
+    from code_puppy.atomic_io import path_lock
+    from code_puppy.config_file import mutate_config
+
+    # Core has no delete-credential API (save() rejects empty values), so
+    # mirror shared_credentials.save() in reverse under the same lock:
+    # drop the shared-store secret and any legacy puppy.cfg value.
+    def _remove_legacy(parser):
+        return (
+            parser.remove_option(config.DEFAULT_SECTION, env_var)
+            if parser.has_section(config.DEFAULT_SECTION)
+            else False
+        )
+
+    try:
+        with path_lock(str(Path(config.CONFIG_DIR) / "provider_credentials")):
+            secret_store.delete_secret(shared_credentials._name(env_var))
+            mutate_config(str(config.CONFIG_FILE), _remove_legacy)
+    except Exception as e:
+        raise SetupError(f"failed to clear stored credential for {env_var}: {e}") from e
+    os.environ.pop(env_var, None)
     out.result(
         {"env_var": env_var, "cleared": True},
         human=f"cleared stored credential for {env_var} "
