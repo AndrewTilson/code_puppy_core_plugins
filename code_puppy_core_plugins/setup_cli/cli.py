@@ -226,7 +226,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="derive sandbox credentials/egress from configured models",
     )
     plan_p.add_argument("--provider", help="restrict to one service/provider id")
-    plan_p.set_defaults(func=lambda o, a: sbx_plan.cmd_sbx_plan(o, a.provider))
+    plan_p.add_argument(
+        "--prune",
+        action="store_true",
+        help="remove stored sbx secrets the current catalog no longer needs",
+    )
+    plan_p.set_defaults(func=lambda o, a: sbx_plan.cmd_sbx_plan(o, a.provider, a.prune))
     creds_p = psbx.add_parser(
         "creds-mixin",
         parents=[common],

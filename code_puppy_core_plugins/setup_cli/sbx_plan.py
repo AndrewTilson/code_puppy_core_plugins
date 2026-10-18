@@ -16,11 +16,12 @@ Values are never read or emitted — only presence on the host.
 from __future__ import annotations
 
 import re
+import subprocess
 from typing import Any, Optional
 from urllib.parse import urlparse
 
 from . import providers
-from .output import Out
+from .output import Out, SetupError
 
 # Static-key model types: type -> (service, env var, domain, header, format)
 _STATIC_TYPES: dict[str, tuple[str, str, str, str, str]] = {
@@ -279,10 +280,95 @@ def render_human(plan: dict[str, Any]) -> list[str]:
     return lines
 
 
-def cmd_sbx_plan(out: Out, provider: Optional[str] = None) -> int:
+def _parse_secret_ls(stdout: str) -> list[str]:
+    """Global service-secret names from `sbx secret ls` table output."""
+    names = []
+    for line in stdout.splitlines():
+        cols = line.split()
+        if len(cols) >= 3 and cols[0] == "(global)" and cols[1] == "service":
+            names.append(cols[2])
+    return sorted(set(names))
+
+
+def _stored_sbx_secrets() -> Optional[list[str]]:
+    """Stored global sbx service secrets; None when sbx is unavailable."""
+    try:
+        result = subprocess.run(
+            ["sbx", "secret", "ls"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return _parse_secret_ls(result.stdout)
+
+
+def _remove_sbx_secret(name: str) -> Optional[str]:
+    """Remove one global sbx secret; None on success, else an error line."""
+    try:
+        result = subprocess.run(
+            ["sbx", "secret", "rm", name, "-f"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return str(e)
+    if result.returncode != 0:
+        return (result.stderr or result.stdout).strip()[
+            :200
+        ] or f"exit {result.returncode}"
+    return None
+
+
+def cmd_sbx_plan(out: Out, provider: Optional[str] = None, prune: bool = False) -> int:
+    if prune and provider:
+        raise SetupError(
+            "refusing --prune with --provider: a filtered plan would "
+            "delete secrets other providers still need",
+            exit_code=2,
+        )
     plan = build_plan(provider=provider)
-    out.result(plan, human=render_human(plan))
-    return 0
+    stored = _stored_sbx_secrets()
+    needed = {c["service"] for c in plan["credentials"]}
+    stale = (
+        [name for name in stored if name not in needed]
+        if stored is not None and not provider
+        else []
+    )
+    human = render_human(plan)
+    pruned: list[str] = []
+    errors: dict[str, str] = {}
+    if prune:
+        for name in stale:
+            error = _remove_sbx_secret(name)
+            if error is None:
+                pruned.append(name)
+                human.append(f"pruned stale sbx secret '{name}'")
+            else:
+                errors[name] = error
+                human.append(f"failed to prune sbx secret '{name}': {error}")
+        stale = [name for name in stale if name not in pruned]
+    elif stale:
+        human.append(
+            "stale sbx secrets (not needed by current catalog): "
+            + ", ".join(stale)
+            + " - re-run with --prune to remove"
+        )
+    result: dict[str, Any] = {
+        **plan,
+        "stale_sbx_secrets": stale,
+        "pruned_sbx_secrets": pruned,
+    }
+    if errors:
+        result["prune_errors"] = errors
+    out.result(result, human=human)
+    return 1 if errors else 0
 
 
 def render_creds_mixin(plan: dict[str, Any]) -> str:

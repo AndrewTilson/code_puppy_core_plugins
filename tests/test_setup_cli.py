@@ -218,6 +218,73 @@ def test_auth_logout_clears_stored_api_key(capsys, monkeypatch, tmp_path):
     capsys.readouterr()
 
 
+def _plan_stub(services):
+    return {
+        "credentials": [
+            {
+                "service": s,
+                "env_var": "X_API_KEY",
+                "domain": "api.example.com",
+                "models": [],
+                "host_credential_present": True,
+            }
+            for s in services
+        ],
+        "oauth": [],
+        "egress": [],
+        "unsupported": [],
+        "default_model": None,
+    }
+
+
+def test_sbx_plan_reports_and_prunes_stale_secrets(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import sbx_plan
+
+    # Only global service secrets are ours to prune; sandbox-scoped and
+    # registry rows are ignored.
+    assert sbx_plan._parse_secret_ls(
+        "SCOPE TYPE NAME SECRET\n"
+        "(global)   service   meta    (stored)\n"
+        "(global)   service   zhipu   (stored)\n"
+        "mybox      service   scoped  (stored)\n"
+        "(global)   registry  ghcr.io (stored)\n"
+    ) == ["meta", "zhipu"]
+
+    monkeypatch.setattr(
+        sbx_plan, "build_plan", lambda provider=None: _plan_stub(["meta"])
+    )
+    monkeypatch.setattr(
+        sbx_plan, "_stored_sbx_secrets", lambda: ["meta", "other", "zhipu"]
+    )
+    removed = []
+    monkeypatch.setattr(
+        sbx_plan, "_remove_sbx_secret", lambda n: removed.append(n) or None
+    )
+
+    # Plain plan reports staleness but deletes nothing.
+    assert cli.main(["sbx", "plan", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["stale_sbx_secrets"] == ["other", "zhipu"]
+    assert data["pruned_sbx_secrets"] == []
+    assert removed == []
+
+    # --prune removes exactly the stale ones.
+    assert cli.main(["sbx", "plan", "--json", "--prune"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["pruned_sbx_secrets"] == ["other", "zhipu"]
+    assert data["stale_sbx_secrets"] == []
+    assert removed == ["other", "zhipu"]
+
+
+def test_sbx_plan_prune_rejected_with_provider_filter(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import sbx_plan
+
+    monkeypatch.setattr(sbx_plan, "build_plan", lambda provider=None: _plan_stub([]))
+    code = cli.main(["sbx", "plan", "--json", "--provider", "meta", "--prune"])
+    assert code == 2
+    capsys.readouterr()
+
+
 def test_sbx_plan_derives_only_used_credentials(monkeypatch):
     from code_puppy_core_plugins.setup_cli import providers
     from code_puppy_core_plugins.setup_cli.sbx_plan import build_plan
