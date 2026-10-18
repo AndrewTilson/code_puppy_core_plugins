@@ -11,6 +11,7 @@ no parallel config logic.
 code-puppy --setup wizard                     # guided first-run setup
 code-puppy --setup doctor [--network]         # what's broken / missing?
 code-puppy --setup auth login meta            # delegate to the plugin's own flow
+code-puppy --setup auth login zai-coding-plan # models.dev id (raw env var also works)
 code-puppy --setup auth list --json
 code-puppy --setup model add anthropic/claude-haiku-5-5 --set-default
 code-puppy --setup model list

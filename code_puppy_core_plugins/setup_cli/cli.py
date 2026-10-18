@@ -92,10 +92,10 @@ def build_parser() -> argparse.ArgumentParser:
         func=lambda o, a: auth_cmds.cmd_auth_list(o)
     )
     s = pa.add_parser("status", parents=[common])
-    s.add_argument("provider")
+    s.add_argument("provider", help="OAuth id, models.dev provider id, or env var")
     s.set_defaults(func=lambda o, a: auth_cmds.cmd_auth_status(o, a.provider))
     li = pa.add_parser("login", parents=[common])
-    li.add_argument("provider")
+    li.add_argument("provider", help="OAuth id, models.dev provider id, or env var")
     li.add_argument(
         "--from-env", metavar="VAR", help="read an API key from this env var"
     )
@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
         func=lambda o, a: auth_cmds.cmd_auth_login(o, a.provider, a.from_env, a.stdin)
     )
     lo = pa.add_parser("logout", parents=[common])
-    lo.add_argument("provider")
+    lo.add_argument("provider", help="OAuth id, models.dev provider id, or env var")
     lo.set_defaults(func=lambda o, a: auth_cmds.cmd_auth_logout(o, a.provider))
 
     p = sub.add_parser("mcp", parents=[common], help="MCP servers")

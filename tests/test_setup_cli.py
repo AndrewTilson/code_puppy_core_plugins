@@ -285,6 +285,74 @@ def test_sbx_plan_prune_rejected_with_provider_filter(capsys, monkeypatch):
     capsys.readouterr()
 
 
+def _patch_models_dev(monkeypatch, mapping):
+    from code_puppy_core_plugins.setup_cli import providers
+
+    monkeypatch.setattr(providers, "_models_dev_providers", lambda: mapping)
+
+
+def test_auth_login_by_provider_id_saves_canonical_env(capsys, monkeypatch):
+    # A models.dev provider id resolves to its declared env vars; the key
+    # is stored under env[0], the name generated model configs reference.
+    import io
+    import sys
+
+    import code_puppy.provider_credentials as pc
+
+    _patch_models_dev(monkeypatch, {"acme-plan": ["ACME_API_KEY", "ACME_ALT_KEY"]})
+    saved = {}
+    monkeypatch.setattr(
+        pc, "save_credential", lambda e, v: saved.update(env=e, value=v)
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO("sekrit\n"))
+    assert cli.main(["auth", "login", "acme-plan", "--stdin", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert saved == {"env": "ACME_API_KEY", "value": "sekrit"}
+    assert data["env_var"] == "ACME_API_KEY"
+    assert data["provider"] == "acme-plan"
+
+
+def test_auth_status_by_provider_id(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import providers
+
+    _patch_models_dev(monkeypatch, {"acme-plan": ["ACME_API_KEY", "ACME_ALT_KEY"]})
+    monkeypatch.setattr(providers, "credential_present", lambda e: e == "ACME_ALT_KEY")
+    assert cli.main(["auth", "status", "acme-plan", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["authenticated"] is True
+    assert data["provider"] == "acme-plan"
+    assert data["env_vars"] == {"ACME_API_KEY": False, "ACME_ALT_KEY": True}
+
+    monkeypatch.setattr(providers, "credential_present", lambda e: False)
+    assert cli.main(["auth", "status", "acme-plan", "--json"]) == 1
+    capsys.readouterr()
+
+
+def test_auth_logout_by_provider_id_clears_all_envs(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import auth_cmds
+
+    _patch_models_dev(monkeypatch, {"acme-plan": ["ACME_API_KEY", "ACME_ALT_KEY"]})
+    cleared = []
+    monkeypatch.setattr(auth_cmds, "_clear_stored_credential", cleared.append)
+    assert cli.main(["auth", "logout", "acme-plan", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert cleared == ["ACME_API_KEY", "ACME_ALT_KEY"]
+    assert data["env_vars"] == ["ACME_API_KEY", "ACME_ALT_KEY"]
+    assert data["provider"] == "acme-plan"
+
+
+def test_auth_provider_id_errors(capsys, monkeypatch):
+    _patch_models_dev(monkeypatch, {"local-only": []})
+    # Known provider that declares no API-key env var.
+    assert cli.main(["auth", "login", "local-only", "--json"]) == 2
+    capsys.readouterr()
+    # Dashed id unknown to models.dev is not treated as an env var.
+    assert cli.main(["auth", "login", "nope-not-real", "--json"]) == 2
+    capsys.readouterr()
+    assert cli.main(["auth", "status", "nope-not-real", "--json"]) == 2
+    capsys.readouterr()
+
+
 def test_sbx_plan_derives_only_used_credentials(monkeypatch):
     from code_puppy_core_plugins.setup_cli import providers
     from code_puppy_core_plugins.setup_cli.sbx_plan import build_plan
