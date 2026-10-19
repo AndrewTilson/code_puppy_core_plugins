@@ -20,6 +20,7 @@ destructive_command_guard
 emoji_filter
 empty_html_comment_filter
 example_custom_command
+execution_environment
 file_permission_handler
 flux_bootstrap
 force_push_guard

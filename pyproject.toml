@@ -83,6 +83,7 @@ destructive_command_guard = "code_puppy_core_plugins.destructive_command_guard.r
 emoji_filter = "code_puppy_core_plugins.emoji_filter.register_callbacks"
 empty_html_comment_filter = "code_puppy_core_plugins.empty_html_comment_filter.register_callbacks"
 example_custom_command = "code_puppy_core_plugins.example_custom_command.register_callbacks"
+execution_environment = "code_puppy_core_plugins.execution_environment.register_callbacks"
 file_permission_handler = "code_puppy_core_plugins.file_permission_handler.register_callbacks"
 flux_bootstrap = "code_puppy_core_plugins.flux_bootstrap.register_callbacks"
 force_push_guard = "code_puppy_core_plugins.force_push_guard.register_callbacks"
