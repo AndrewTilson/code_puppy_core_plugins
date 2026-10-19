@@ -160,6 +160,31 @@ def _models_dev_env_vars() -> frozenset:
         return frozenset()
 
 
+def _models_dev_providers() -> dict[str, list[str]]:
+    """models.dev provider id -> declared API-key env vars (best effort)."""
+    try:
+        from code_puppy.models_dev_parser import ModelsDevRegistry
+
+        providers_map = ModelsDevRegistry().get_providers()
+        values = (
+            providers_map.values() if isinstance(providers_map, dict) else providers_map
+        )
+        return {p.id: list(p.env or []) for p in values if getattr(p, "id", None)}
+    except Exception:
+        return {}
+
+
+def api_key_envs_for_provider(provider_id: str) -> Optional[list[str]]:
+    """Env vars a models.dev provider declares; None if the id is unknown.
+
+    ``env[0]`` is canonical: it is the name ``setup model add``
+    encodes into generated model configs, so a login by provider id
+    stores the key exactly where those models will look for it.
+    """
+    envs = _models_dev_providers().get(provider_id.strip().lower())
+    return list(envs) if envs is not None else None
+
+
 def is_known_api_key_env(env_var: str) -> bool:
     """Known via the curated lists OR declared by a models.dev provider."""
     return env_var in api_key_env_vars() or env_var in _models_dev_env_vars()

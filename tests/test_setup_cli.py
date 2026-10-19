@@ -184,6 +184,175 @@ def test_auth_status_accepts_models_dev_env_var(capsys, monkeypatch):
     assert data["kind"] == "api-key"
 
 
+def test_auth_logout_clears_stored_api_key(capsys, monkeypatch, tmp_path):
+    # Regression: logout used to call save_credential(env, ""), which core
+    # rejects (empty values raise), so the key was never removed. Logout
+    # must delete from the shared secret store, drop any legacy puppy.cfg
+    # value, and clear the process env; a second logout is a no-op.
+    import configparser
+    import os
+
+    from code_puppy import config as cp_config
+    from code_puppy import config_file, secret_store
+
+    deleted = []
+    monkeypatch.setattr(
+        secret_store, "delete_secret", lambda name: deleted.append(name)
+    )
+    parser = configparser.ConfigParser()
+    parser[cp_config.DEFAULT_SECTION] = {"ZHIPU_API_KEY": "sekrit"}
+    monkeypatch.setattr(config_file, "mutate_config", lambda path, fn: fn(parser))
+    monkeypatch.setattr(cp_config, "CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(cp_config, "CONFIG_FILE", str(tmp_path / "puppy.cfg"))
+    monkeypatch.setenv("ZHIPU_API_KEY", "sekrit")
+
+    assert cli.main(["auth", "logout", "ZHIPU_API_KEY", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["cleared"] is True
+    assert deleted == ["provider_ZHIPU_API_KEY"]
+    assert not parser.has_option(cp_config.DEFAULT_SECTION, "ZHIPU_API_KEY")
+    assert "ZHIPU_API_KEY" not in os.environ
+
+    # Idempotent: nothing stored anymore, still success.
+    assert cli.main(["auth", "logout", "ZHIPU_API_KEY", "--json"]) == 0
+    capsys.readouterr()
+
+
+def _plan_stub(services):
+    return {
+        "credentials": [
+            {
+                "service": s,
+                "env_var": "X_API_KEY",
+                "domain": "api.example.com",
+                "models": [],
+                "host_credential_present": True,
+            }
+            for s in services
+        ],
+        "oauth": [],
+        "egress": [],
+        "unsupported": [],
+        "default_model": None,
+    }
+
+
+def test_sbx_plan_reports_and_prunes_stale_secrets(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import sbx_plan
+
+    # Only global service secrets are ours to prune; sandbox-scoped and
+    # registry rows are ignored.
+    assert sbx_plan._parse_secret_ls(
+        "SCOPE TYPE NAME SECRET\n"
+        "(global)   service   meta    (stored)\n"
+        "(global)   service   zhipu   (stored)\n"
+        "mybox      service   scoped  (stored)\n"
+        "(global)   registry  ghcr.io (stored)\n"
+    ) == ["meta", "zhipu"]
+
+    monkeypatch.setattr(
+        sbx_plan, "build_plan", lambda provider=None: _plan_stub(["meta"])
+    )
+    monkeypatch.setattr(
+        sbx_plan, "_stored_sbx_secrets", lambda: ["meta", "other", "zhipu"]
+    )
+    removed = []
+    monkeypatch.setattr(
+        sbx_plan, "_remove_sbx_secret", lambda n: removed.append(n) or None
+    )
+
+    # Plain plan reports staleness but deletes nothing.
+    assert cli.main(["sbx", "plan", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["stale_sbx_secrets"] == ["other", "zhipu"]
+    assert data["pruned_sbx_secrets"] == []
+    assert removed == []
+
+    # --prune removes exactly the stale ones.
+    assert cli.main(["sbx", "plan", "--json", "--prune"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["pruned_sbx_secrets"] == ["other", "zhipu"]
+    assert data["stale_sbx_secrets"] == []
+    assert removed == ["other", "zhipu"]
+
+
+def test_sbx_plan_prune_rejected_with_provider_filter(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import sbx_plan
+
+    monkeypatch.setattr(sbx_plan, "build_plan", lambda provider=None: _plan_stub([]))
+    code = cli.main(["sbx", "plan", "--json", "--provider", "meta", "--prune"])
+    assert code == 2
+    capsys.readouterr()
+
+
+def _patch_models_dev(monkeypatch, mapping):
+    from code_puppy_core_plugins.setup_cli import providers
+
+    monkeypatch.setattr(providers, "_models_dev_providers", lambda: mapping)
+
+
+def test_auth_login_by_provider_id_saves_canonical_env(capsys, monkeypatch):
+    # A models.dev provider id resolves to its declared env vars; the key
+    # is stored under env[0], the name generated model configs reference.
+    import io
+    import sys
+
+    import code_puppy.provider_credentials as pc
+
+    _patch_models_dev(monkeypatch, {"acme-plan": ["ACME_API_KEY", "ACME_ALT_KEY"]})
+    saved = {}
+    monkeypatch.setattr(
+        pc, "save_credential", lambda e, v: saved.update(env=e, value=v)
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO("sekrit\n"))
+    assert cli.main(["auth", "login", "acme-plan", "--stdin", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert saved == {"env": "ACME_API_KEY", "value": "sekrit"}
+    assert data["env_var"] == "ACME_API_KEY"
+    assert data["provider"] == "acme-plan"
+
+
+def test_auth_status_by_provider_id(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import providers
+
+    _patch_models_dev(monkeypatch, {"acme-plan": ["ACME_API_KEY", "ACME_ALT_KEY"]})
+    monkeypatch.setattr(providers, "credential_present", lambda e: e == "ACME_ALT_KEY")
+    assert cli.main(["auth", "status", "acme-plan", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["authenticated"] is True
+    assert data["provider"] == "acme-plan"
+    assert data["env_vars"] == {"ACME_API_KEY": False, "ACME_ALT_KEY": True}
+
+    monkeypatch.setattr(providers, "credential_present", lambda e: False)
+    assert cli.main(["auth", "status", "acme-plan", "--json"]) == 1
+    capsys.readouterr()
+
+
+def test_auth_logout_by_provider_id_clears_all_envs(capsys, monkeypatch):
+    from code_puppy_core_plugins.setup_cli import auth_cmds
+
+    _patch_models_dev(monkeypatch, {"acme-plan": ["ACME_API_KEY", "ACME_ALT_KEY"]})
+    cleared = []
+    monkeypatch.setattr(auth_cmds, "_clear_stored_credential", cleared.append)
+    assert cli.main(["auth", "logout", "acme-plan", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert cleared == ["ACME_API_KEY", "ACME_ALT_KEY"]
+    assert data["env_vars"] == ["ACME_API_KEY", "ACME_ALT_KEY"]
+    assert data["provider"] == "acme-plan"
+
+
+def test_auth_provider_id_errors(capsys, monkeypatch):
+    _patch_models_dev(monkeypatch, {"local-only": []})
+    # Known provider that declares no API-key env var.
+    assert cli.main(["auth", "login", "local-only", "--json"]) == 2
+    capsys.readouterr()
+    # Dashed id unknown to models.dev is not treated as an env var.
+    assert cli.main(["auth", "login", "nope-not-real", "--json"]) == 2
+    capsys.readouterr()
+    assert cli.main(["auth", "status", "nope-not-real", "--json"]) == 2
+    capsys.readouterr()
+
+
 def test_sbx_plan_derives_only_used_credentials(monkeypatch):
     from code_puppy_core_plugins.setup_cli import providers
     from code_puppy_core_plugins.setup_cli.sbx_plan import build_plan
