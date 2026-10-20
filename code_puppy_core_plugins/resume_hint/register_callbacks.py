@@ -4,14 +4,15 @@ Hooks ``shutdown``, which ``cli_runner.main`` fires *after* the persistent UI
 and message renderers are torn down. That makes it the last thing on screen,
 but it also means the message bus is gone, so we write straight to stdout.
 
-The hint only appears when the session file actually exists on disk, so we
-never advertise a resume target that ``--resume`` would lazily create empty
-(autosave disabled, nothing said yet, or a fresh ``/clear``).
+The hint only appears when autosave is on and the session file exists on
+disk, so we never advertise a name with nothing saved behind it (nothing
+said yet, or a fresh ``/clear``) or a stale snapshot (autosave disabled).
 """
 
 from __future__ import annotations
 
 import logging
+import shutil
 import sys
 from importlib.resources import files
 from pathlib import Path
@@ -19,6 +20,7 @@ from pathlib import Path
 from code_puppy.callbacks import register_callback
 from code_puppy.config import (
     AUTOSAVE_DIR,
+    get_auto_save_session,
     get_current_session_name,
     get_headless_mode,
 )
@@ -32,11 +34,16 @@ logger = logging.getLogger(__name__)
 # Console scripts from code-puppy's pyproject; echo back whichever one was typed.
 _ENTRYPOINTS = frozenset({"code-puppy", "pup"})
 _DEFAULT_ENTRYPOINT = "code-puppy"
+# Neither on PATH usually means ``uvx code-puppy``, the README's launch method.
+_UVX_FALLBACK = "uvx code-puppy"
 
 
-def _entrypoint_name() -> str:
+def _launch_command() -> str:
     invoked = Path(sys.argv[0]).stem if sys.argv else ""
-    return invoked if invoked in _ENTRYPOINTS else _DEFAULT_ENTRYPOINT
+    for name in (invoked, _DEFAULT_ENTRYPOINT):
+        if name in _ENTRYPOINTS and shutil.which(name):
+            return name
+    return _UVX_FALLBACK
 
 
 def _saved_session_name() -> str | None:
@@ -48,13 +55,23 @@ def _saved_session_name() -> str | None:
     return None
 
 
+def _resume_arg(session_name: str) -> str:
+    # argparse reads a leading "-" as an option; the "=" form keeps it a value.
+    separator = "=" if session_name.startswith("-") else " "
+    return f"--resume{separator}{session_name}"
+
+
 def _format_resume_hint(session_name: str) -> str:
-    return f"\n{t('plugin.resume-hint.header')}\n  {_entrypoint_name()} --resume {session_name}\n"
+    return (
+        f"\n{t('plugin.resume-hint.header')}\n"
+        f"  {_launch_command()} {_resume_arg(session_name)}\n"
+    )
 
 
 def _on_shutdown() -> None:
-    # Headless ``-p`` stdout is often machine-parsed; don't pollute it.
-    if get_headless_mode():
+    # Headless ``-p`` stdout is often machine-parsed; with autosave off, the
+    # file on disk is a stale snapshot rather than "this session".
+    if get_headless_mode() or not get_auto_save_session():
         return
     try:
         session_name = _saved_session_name()

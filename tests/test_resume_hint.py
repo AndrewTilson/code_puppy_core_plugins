@@ -2,36 +2,34 @@
 
 from __future__ import annotations
 
-import json
-
-from pathlib import Path
+import argparse
+import shlex
+from importlib.resources import files
 
 import pytest
-from code_puppy.i18n import add_catalog_dir
-from code_puppy.i18n.plugin_catalog import canonical_plugin_namespace
+from code_puppy.i18n import register_plugin_catalog
+from code_puppy.plugins import _plugin_loading_context
 
 from code_puppy_core_plugins.resume_hint import register_callbacks as plugin
 
 SESSION = "auto_session_20261020_132142_000001_4242"
-LOCALES = Path(plugin.__file__).parent / "locales"
 
 
-def test_catalog_keys_use_the_namespace_the_loader_requires():
-    # register_plugin_catalog rejects the whole catalog if any key strays.
-    namespace = canonical_plugin_namespace("resume_hint")
-    for catalog in LOCALES.glob("*.json"):
-        for key in json.loads(catalog.read_text(encoding="utf-8")):
-            assert key.startswith(namespace), f"{catalog.name}: {key}"
+def _on_path(*names):
+    return lambda name: f"/usr/local/bin/{name}" if name in names else None
 
 
 @pytest.fixture
 def autosave_dir(tmp_path, monkeypatch):
-    # Direct imports bypass the plugin loader that owns register_plugin_catalog.
-    add_catalog_dir(str(LOCALES))
+    # Register exactly as the loader does, so namespace rules are enforced.
+    with _plugin_loading_context("resume_hint"):
+        assert register_plugin_catalog(files(plugin.__package__).joinpath("locales"))
     monkeypatch.setattr(plugin, "AUTOSAVE_DIR", str(tmp_path))
     monkeypatch.setattr(plugin, "get_current_session_name", lambda: SESSION)
     monkeypatch.setattr(plugin, "get_headless_mode", lambda: False)
+    monkeypatch.setattr(plugin, "get_auto_save_session", lambda: True)
     monkeypatch.setattr(plugin.sys, "argv", ["/some/venv/bin/pup"])
+    monkeypatch.setattr(plugin.shutil, "which", _on_path("pup", "code-puppy"))
     return tmp_path
 
 
@@ -61,6 +59,16 @@ def test_silent_in_headless_mode(autosave_dir, capsys, monkeypatch):
     assert capsys.readouterr().out == ""
 
 
+def test_silent_when_autosave_disabled(autosave_dir, capsys, monkeypatch):
+    # A file from /compact or an earlier --resume would be a stale snapshot.
+    (autosave_dir / f"{SESSION}.json").write_text("{}")
+    monkeypatch.setattr(plugin, "get_auto_save_session", lambda: False)
+
+    plugin._on_shutdown()
+
+    assert capsys.readouterr().out == ""
+
+
 def test_lookup_failure_never_raises(autosave_dir, capsys, monkeypatch):
     def boom():
         raise RuntimeError("config exploded")
@@ -72,22 +80,33 @@ def test_lookup_failure_never_raises(autosave_dir, capsys, monkeypatch):
     assert capsys.readouterr().out == ""
 
 
+@pytest.mark.parametrize("session_name", [SESSION, "-dash-first"])
+def test_resume_arg_parses_back_to_the_session_name(session_name):
+    # Mirrors cli_runner's --resume definition; argparse eats a bare "-x" value.
+    parser = argparse.ArgumentParser(exit_on_error=False)
+    parser.add_argument("--resume", "-r", type=str)
+
+    args = parser.parse_args(shlex.split(plugin._resume_arg(session_name)))
+
+    assert args.resume == session_name
+
+
 @pytest.mark.parametrize(
-    ("argv0", "expected"),
+    ("argv", "on_path", "expected"),
     [
-        ("/venv/bin/pup", "pup"),
-        ("/venv/Scripts/pup.exe", "pup"),
-        ("/venv/bin/code-puppy", "code-puppy"),
-        ("/repo/code_puppy/__main__.py", "code-puppy"),
+        (["/venv/bin/pup"], ("pup", "code-puppy"), "pup"),
+        (["/venv/Scripts/pup.exe"], ("pup",), "pup"),
+        (["/venv/bin/code-puppy"], ("code-puppy",), "code-puppy"),
+        (["/repo/code_puppy/__main__.py"], ("code-puppy",), "code-puppy"),
+        (["/venv/bin/pup"], ("code-puppy",), "code-puppy"),
+        (["/uv/archive-v0/abc/bin/code-puppy"], (), "uvx code-puppy"),
+        ([], (), "uvx code-puppy"),
     ],
 )
-def test_entrypoint_echoes_what_user_typed(monkeypatch, argv0, expected):
-    monkeypatch.setattr(plugin.sys, "argv", [argv0])
+def test_launch_command_is_runnable_from_the_shell(
+    monkeypatch, argv, on_path, expected
+):
+    monkeypatch.setattr(plugin.sys, "argv", argv)
+    monkeypatch.setattr(plugin.shutil, "which", _on_path(*on_path))
 
-    assert plugin._entrypoint_name() == expected
-
-
-def test_entrypoint_defaults_when_argv_empty(monkeypatch):
-    monkeypatch.setattr(plugin.sys, "argv", [])
-
-    assert plugin._entrypoint_name() == "code-puppy"
+    assert plugin._launch_command() == expected
