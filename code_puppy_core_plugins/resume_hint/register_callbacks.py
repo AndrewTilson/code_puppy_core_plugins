@@ -1,4 +1,4 @@
-"""Leave a breadcrumb on exit: ``Resume this session with: pup --resume <name>``.
+"""Leave a breadcrumb on exit: ``Resume this session with: uvx code-puppy --resume <name>``.
 
 Hooks ``shutdown``, which ``cli_runner.main`` fires *after* the persistent UI
 and message renderers are torn down. That makes it the last thing on screen,
@@ -12,8 +12,6 @@ said yet, or a fresh ``/clear``) or a stale snapshot (autosave disabled).
 from __future__ import annotations
 
 import logging
-import shutil
-import sys
 from importlib.resources import files
 from pathlib import Path
 
@@ -31,19 +29,8 @@ register_plugin_catalog(files(__package__).joinpath("locales"))
 
 logger = logging.getLogger(__name__)
 
-# Console scripts from code-puppy's pyproject; echo back whichever one was typed.
-_ENTRYPOINTS = frozenset({"code-puppy", "pup"})
-_DEFAULT_ENTRYPOINT = "code-puppy"
-# Neither on PATH usually means ``uvx code-puppy``, the README's launch method.
-_UVX_FALLBACK = "uvx code-puppy"
-
-
-def _launch_command() -> str:
-    invoked = Path(sys.argv[0]).stem if sys.argv else ""
-    for name in (invoked, _DEFAULT_ENTRYPOINT):
-        if name in _ENTRYPOINTS and shutil.which(name):
-            return name
-    return _UVX_FALLBACK
+# The README's launch method; works whether or not code-puppy is installed.
+_LAUNCH_COMMAND = "uvx code-puppy"
 
 
 def _saved_session_name() -> str | None:
@@ -64,7 +51,7 @@ def _resume_arg(session_name: str) -> str:
 def _format_resume_hint(session_name: str) -> str:
     return (
         f"\n{t('plugin.resume-hint.header')}\n"
-        f"  {_launch_command()} {_resume_arg(session_name)}\n"
+        f"  {_LAUNCH_COMMAND} {_resume_arg(session_name)}\n"
     )
 
 
