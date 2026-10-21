@@ -69,11 +69,11 @@ def _format_resume_hint(session_name: str) -> str:
 
 
 def _on_shutdown() -> None:
-    # Headless ``-p`` stdout is often machine-parsed; with autosave off, the
-    # file on disk is a stale snapshot rather than "this session".
-    if get_headless_mode() or not get_auto_save_session():
-        return
     try:
+        # Headless ``-p`` stdout is often machine-parsed; with autosave off,
+        # the file on disk is a stale snapshot rather than "this session".
+        if get_headless_mode() or not get_auto_save_session():
+            return
         session_name = _saved_session_name()
         if session_name:
             print(_format_resume_hint(session_name), flush=True)

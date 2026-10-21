@@ -69,11 +69,16 @@ def test_silent_when_autosave_disabled(autosave_dir, capsys, monkeypatch):
     assert capsys.readouterr().out == ""
 
 
-def test_lookup_failure_never_raises(autosave_dir, capsys, monkeypatch):
+@pytest.mark.parametrize(
+    "dependency",
+    ["get_current_session_name", "get_auto_save_session", "get_headless_mode"],
+)
+def test_lookup_failure_never_raises(autosave_dir, capsys, monkeypatch, dependency):
+    # e.g. puppy.cfg turning unreadable mid-session makes config reads raise.
     def boom():
-        raise RuntimeError("config exploded")
+        raise PermissionError("config exploded")
 
-    monkeypatch.setattr(plugin, "get_current_session_name", boom)
+    monkeypatch.setattr(plugin, dependency, boom)
 
     plugin._on_shutdown()  # must not raise on the exit path
 
