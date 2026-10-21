@@ -8,7 +8,7 @@ import sys
 from importlib.resources import files
 
 import pytest
-from code_puppy.i18n import register_plugin_catalog
+from code_puppy.i18n import get_locale, register_plugin_catalog, set_locale
 from code_puppy.plugins import _plugin_loading_context
 
 from code_puppy_core_plugins.resume_hint import register_callbacks as plugin
@@ -39,6 +39,26 @@ def test_prints_hint_when_session_saved(autosave_dir, capsys, suffix):
     out = capsys.readouterr().out
     assert "Resume this session with:" in out
     assert f"  uvx code-puppy --resume {SESSION}" in out
+
+
+@pytest.mark.parametrize(
+    ("locale", "header"),
+    [
+        ("en-US", "Resume this session with:"),
+        ("es", "Reanuda esta sesión con:"),
+        ("fr-CA", "Reprenez cette session avec :"),
+    ],
+)
+def test_header_is_translated(autosave_dir, capsys, locale, header):
+    (autosave_dir / f"{SESSION}.json").write_text("{}")
+    previous_locale = get_locale()
+    try:
+        set_locale(locale)
+        plugin._on_shutdown()
+    finally:
+        set_locale(previous_locale)
+
+    assert capsys.readouterr().out.startswith(f"\n{header}\n")
 
 
 def test_silent_when_session_never_saved(autosave_dir, capsys):
